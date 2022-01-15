@@ -219,7 +219,6 @@ async def get_all_transactions(token: str=Header(None)):
         {"toUser.id" : user_id}
     ]}
     transactions = transaction_model_dal.read(query=transaction_query,limit=24)
-    print(transactions)
     return transactions
 
 @app.post("/transaction/request_money")
@@ -291,6 +290,10 @@ async def fulfil_request(transaction_id: str, token: str=Header(None)):
     if transaction.trn_type == "transfer":
         return HTTPException(status_code=400, detail="transaction request has already been fulfilled")
 
+    # checking if transfer has been rejected, a rejected transfer can not been re sent
+    if transaction.trn_type == "transfer_rejected":
+        return HTTPException(status_code=400, detail="transaction has already been rejected")
+
     # fulfil transaction 
     await transaction_model_dal.fulfil_transaction(transaction)
     # send email to sender
@@ -301,8 +304,40 @@ async def fulfil_request(transaction_id: str, token: str=Header(None)):
 
     return {"message" : "you have successfully fulfilled transaction request"}
 
+@app.get("/transaction/reject_request")
+async def reject_request(transaction_id: str, token: str=Header(None)):
+    user_id = validate_token_and_get_user(token)    
+    if "token" in user_id:
+        return HTTPException(status_code=400, detail=user_id)
 
+    transaction_query = {"id" : transaction_id}
+    transactions = transaction_model_dal.read(query=transaction_query, limit=1)
+    if len(transactions) == 0:
+        return HTTPException(status_code=400, detail="no transaction by id found")
 
+    transaction = transactions[0]
+    if transaction.trn_type == "transfer":
+        return HTTPException(status_code=400, detail="transfer has already been made")
+
+    # the requester and requested people has the right to reject/cancel a request
+    if transaction.from_user["id"] != user_id and transaction.to_user["id"] != user_id:
+        return HTTPException(status_code=401, detail="user has no privelage to reject request")
+
+    # update transaction data
+    update_data = {"trnType" : "transfer_rejected"}
+    transaction_model_dal.update(transaction_query, update_data)
+
+    # transfer request has been rejected by the party that the request was sent to
+    if transaction.from_user["id"] == user_id:
+        send_email(transaction.to_user["email"], f"Your request for {str(transaction.amount)}br has been rejected", f"Your request for {str(transaction.amount)}br from {transaction.from_user['email']} has been rejected")
+        send_email(transaction.from_user["email"], f"You have rejected a request of {str(transaction.amount)}br", f"Your have rejected a request of {str(transaction.amount)}br from {transaction.to_user['email']}")   
+
+    # tranfer request has been cancelled by the party that initated the request
+    if transaction.to_user["id"] == user_id:
+        send_email(transaction.to_user["email"], f"You have cancelled your request for {str(transaction.amount)}br", f"You have cancelled your request for {str(transaction.amount)}br")
+        send_email(transaction.from_user["email"], f"The request for {str(transaction.amount)}br has been cancelled by the user!", f"The request for {str(transaction.amount)}br has been cancelled by the user!")   
+
+    return {"message" : "transaction request has successfully been cancelled or rejected"}
 def validate_token_and_get_user(token):
     if token == None:
         return "no token provided"
