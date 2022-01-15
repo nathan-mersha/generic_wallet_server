@@ -61,7 +61,6 @@ async def login_user(loginModel: LoginModel):
     
    # compare hash of password
     hashed_password = hashlib.sha256(str(loginModel.password).encode('utf-8')).hexdigest()
-
     user_query = {"email" : loginModel.email}
     users =  user_model_dal.read(query=user_query, limit=1)
     
@@ -69,19 +68,15 @@ async def login_user(loginModel: LoginModel):
         return HTTPException(status_code=401, detail="email does not exist") 
 
     user = users[0] 
-
     if user.password != hashed_password:
         return HTTPException(status_code=401, detail="email and password do not match")
    
-    
     # generate token
     after_six_months = date.today() + relativedelta(months=+6)
-    
     encoded_jwt = jwt.encode({
         "id" : user.id,
         "expiration" : str(after_six_months)
     }, token_encrypter_secret, algorithm="HS256")
-
 
     return {"token" : str(encoded_jwt).replace("b'","").replace("'","")}
 
@@ -233,7 +228,6 @@ async def request_money(requestMoney: RequestMoneyModel, token: str=Header(None)
     if "token" in user_id:
         return HTTPException(status_code=400, detail=user_id)
 
-
     # create request transaction document
     requester_query = {"id" : user_id}
     requester_users = user_model_dal.read(query=requester_query, limit=1)
@@ -253,8 +247,8 @@ async def request_money(requestMoney: RequestMoneyModel, token: str=Header(None)
         id=str(uuid.uuid4()),
         amount=requestMoney.amount,
         payload=requestMoney.payload,
-        from_user=requester_user,
-        to_user=requested_user,
+        from_user=requested_user,
+        to_user=requester_user,
         trn_type="transfer_request",
         first_modified=str(datetime.now().isoformat()),
         last_modified=str(datetime.now().isoformat())
@@ -266,10 +260,48 @@ async def request_money(requestMoney: RequestMoneyModel, token: str=Header(None)
     send_email(requester_user.email, "Your request has been sent", f"Your request for {str(requestMoney.amount)} has been sent")
 
     # send email to the person requesting the transaction
-    send_email(requested_user.email, "You have a request to transfer money", f"You have a request to transfer money to {requester_user.name} for amount {str(requestMoney.amount)} \n use the below link to complete transaction http://localhost:8000/transaction/complete_request?id={transaction_data.id}")
+    send_email(requested_user.email, "You have a request to transfer money", f"You have a request to transfer money to {requester_user.name} for amount {str(requestMoney.amount)} \n use the below link to complete transaction http://localhost:8000/transaction/complete_request?transaction_id={transaction_data.id}")
     
     return {"message" : "request has been sent"}
     
+@app.get("/transaction/fulfil_request")
+async def fulfil_request(transaction_id: str, token: str=Header(None)):
+    user_id = validate_token_and_get_user(token)    
+    if "token" in user_id:
+        return HTTPException(status_code=400, detail=user_id)
+
+    transaction_query = {"id" : transaction_id}
+    transactions = transaction_model_dal.read(query=transaction_query, limit=1)
+    if len(transactions) == 0:
+        return HTTPException(status_code=400, detail="no transaction by id found")
+    
+    sender_query = {"id" : user_id}
+    sender_users = user_model_dal.read(query=sender_query, limit=1)
+    if len(sender_users) == 0:
+        return HTTPException(status_code=401, detail="user does not exist")
+
+    sender = sender_users[0]
+    transaction = transactions[0]
+
+    # check if user has enough balance
+    if sender.available_balance < transaction.amount: # user does not have enough credit
+        return HTTPException(status_code=400, detail="user does not have enough balance")
+
+    # check if transaction request has already been fulfiled
+    if transaction.trn_type == "transfer":
+        return HTTPException(status_code=400, detail="transaction request has already been fulfilled")
+
+    # fulfil transaction 
+    await transaction_model_dal.fulfil_transaction(transaction)
+    # send email to sender
+    send_email(transaction.from_user["email"], "You have fulfiled a transaction request", "You have fulfiled a transaction request")
+    # send email to reciever
+    send_email(transaction.to_user["email"], f"Your request for {str(transaction.amount)} has been fulfiled", f"Your request for {str(transaction.amount)} has been fulfiled")
+    transaction_model_dal.fulfil_transaction(transaction)
+
+    return {"message" : "you have successfully fulfilled transaction request"}
+
+
 
 def validate_token_and_get_user(token):
     if token == None:

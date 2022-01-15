@@ -49,4 +49,6 @@ class SendMoneyModel(BaseModel):
 class RequestMoneyModel(BaseModel):
     amount: float
     payload: Optional[dict] = {}
-    to_user_email: str    
+    to_user_email: str
+
+    
