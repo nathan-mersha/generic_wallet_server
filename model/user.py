@@ -61,16 +61,11 @@ class ChangePasswordModel(BaseModel):
 
 class UpdateUserModel(BaseModel):
     name: Optional[str] = None
-    email: Optional[str] = None
 
     def to_json(self):
         load = {}
         if self.name != None:
             load["name"] = self.name
-
-        if self.email != None:
-            load["email"] = self.email
-
         return load
 
 

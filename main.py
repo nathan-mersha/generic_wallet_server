@@ -1,32 +1,57 @@
-import datetime
 from email.policy import HTTP
 import hashlib
+from turtle import clear
 import uuid
 import smtplib
 import random
+
 import jwt
-from datetime import date,datetime
+from datetime import date,datetime, timedelta
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
-from typing import Optional
-
 from dal.user import UserModelDAL
-from dal.transaction import TransactionModelDAL
+from dal.transaction import TransactionModel
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, WebSocket
+from starlette.websockets import WebSocket, WebSocketDisconnect
+from lib.notifier import ConnectionManager
 from model.user import LoginModel, UserModel, ForgotPasswordModel, ResetPasswordModel, ChangePasswordModel, UpdateUserModel
-from model.transaction import TransactionModel, SendMoneyModel, RequestMoneyModel
+from model.transaction import  TransactionModel, SendMoneyModel, RequestMoneyModel
+from fastapi.middleware.cors import CORSMiddleware
+from dal.transaction import TransactionModelDAL
+from dal.notification import NotificationModelDAL
+import json
 
 app = FastAPI()
 user_model_dal = UserModelDAL()
 transaction_model_dal = TransactionModelDAL()
+notification_model_dal = NotificationModelDAL()
 hash_256 = hashlib.sha256()
-
 token_encrypter_secret = "jopavaeiva3ser223av21r233fasdop890"
 
+# run server command for development
+# python -m uvicorn main:app --reload
+
+# web socket notifier
+connectionManager = ConnectionManager()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/")
-def read_root():
+async def read_root():
+    message = {
+        "userId" : "6bb08f15-c2f6-4ed4-9184-b2bfc5186e83",
+        "message" : "Hello there nathan"
+    }
+    res_from_sock = await connectionManager.send_personal_message(json.dumps(message),"6bb08f15-c2f6-4ed4-9184-b2bfc5186e83")
+    print(f"Res from sck is : {res_from_sock}")
     return {"Message": "Welcome to Generic wallet"}
 
 # user API's
@@ -78,7 +103,12 @@ async def login_user(loginModel: LoginModel):
         "expiration" : str(after_six_months)
     }, token_encrypter_secret, algorithm="HS256")
 
-    return {"token" : str(encoded_jwt).replace("b'","").replace("'","")}
+    return {
+        "token" : str(encoded_jwt).replace("b'","").replace("'",""),
+        "email" : user.email,
+        "userId" : user.id
+        
+        }
 
 @app.post("/user/forgot_password")
 async def forgot_password(forgotModel: ForgotPasswordModel): 
@@ -91,7 +121,7 @@ async def forgot_password(forgotModel: ForgotPasswordModel):
     user = users[0]
     user_payload = user.payload
     user_payload["resetCode"] = reset_code
-    update_data = { "$set": { 'payload': user_payload} }
+    update_data = { 'payload': user_payload}
     # update user here
     user_model_dal.update(user_query, update_data)
     send_email(user.email, "You have requested reset code", f"Your reset code is : {reset_code}")
@@ -124,7 +154,7 @@ async def reset_password(resetPassword: ResetPasswordModel):
         return HTTPException(status_code=401, detail="reset code is not correct")
 
     new_hashed_password = hashlib.sha256(str(resetPassword.new_password).encode('utf-8')).hexdigest()
-    update_data = {"$set" : {'password' : new_hashed_password}}
+    update_data = {'password' : new_hashed_password}
     user_model_dal.update(user_query, update_data) # password successfuly updated and hashed
     
     # send email to user
@@ -198,7 +228,6 @@ async def send_money(sendMoney: SendMoneyModel, token: str=Header(None)):
         first_modified=str(datetime.now().isoformat()),
         last_modified=str(datetime.now().isoformat())
     )
-
     transaction_res = await transaction_model_dal.create(transaction_data)
 
     transaction_query = {"_id" : transaction_res.inserted_id}
@@ -255,6 +284,9 @@ async def request_money(requestMoney: RequestMoneyModel, token: str=Header(None)
 
     await transaction_model_dal.create(transaction_data)
 
+    # notifying the user via socket
+    await connectionManager.send_personal_message(json.dumps(transaction_data.to_json()),requested_user.id)
+    
     # send email to the person being requested
     send_email(requester_user.email, "Your request has been sent", f"Your request for {str(requestMoney.amount)} has been sent")
 
@@ -338,6 +370,50 @@ async def reject_request(transaction_id: str, token: str=Header(None)):
         send_email(transaction.from_user["email"], f"The request for {str(transaction.amount)}br has been cancelled by the user!", f"The request for {str(transaction.amount)}br has been cancelled by the user!")   
 
     return {"message" : "transaction request has successfully been cancelled or rejected"}
+
+@app.get("/transaction/insight")
+async def transaction_insight(days = 7, token: str=Header(None)):
+   
+    user_id = validate_token_and_get_user(token)    
+    if "token" in user_id:
+        return HTTPException(status_code=400, detail=user_id)
+    
+    seven_days_before = datetime.now() - timedelta(days=int(days))
+    transaction_query = {"$and" : [
+        {"firstModified" : {"$gt" : str(seven_days_before)}},
+        {
+            "$or" : [
+            {"fromUser.id" : user_id},
+            {"toUser.id" : user_id}
+        ]}
+    ] }
+    transactions = transaction_model_dal.read(query=transaction_query,limit=100)
+
+    debit = 0 # incoming 
+    credit = 0 # outgoing
+
+    for transaction in transactions:        
+        if transaction.from_user["id"] == user_id: # user is sender
+            credit += transaction.amount
+        else:
+            debit += transaction.amount    
+
+    return {
+        "debit" : debit,
+        "credit" : credit
+    }
+
+# defining websockets
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await connectionManager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+        
+    except WebSocketDisconnect:
+        connectionManager.disconnect(websocket)
+
 def validate_token_and_get_user(token):
     if token == None:
         return "no token provided"
@@ -356,7 +432,6 @@ def validate_token_and_get_user(token):
         return "token has expired"
 
     return user_id
-
 
 def send_email(recipients, body, subject):
     try:

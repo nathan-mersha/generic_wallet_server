@@ -51,4 +51,3 @@ class RequestMoneyModel(BaseModel):
     payload: Optional[dict] = {}
     to_user_email: str
 
-    
