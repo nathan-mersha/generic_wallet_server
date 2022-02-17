@@ -1,0 +1,24 @@
+pipeline {
+    agent any
+    stages {
+        stage('Copy Config') {
+            steps {
+                sh 'sudo cp -r -f nginx.conf /etc/nginx/'
+            }
+        }
+
+        stage('Test Configuration') {
+            steps {
+                sh 'sudo nginx -t'
+            }
+        }
+
+        stage('Reload'){
+            steps {
+                sh 'sudo service nginx reload'
+            }
+        }
+
+
+    }
+}
