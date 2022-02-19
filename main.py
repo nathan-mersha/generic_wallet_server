@@ -55,7 +55,7 @@ async def read_root():
     return {"Message": "Welcome to Generic wallet"}
 
 # user API's
-@app.post("/user/signup")
+@app.post("/server/user/signup")
 async def sign_up_user(user: UserModel):
 
     # checking if user email does not already exists
@@ -81,7 +81,7 @@ async def sign_up_user(user: UserModel):
     
     return user.to_json()
 
-@app.post("/user/login")
+@app.post("/server/user/login")
 async def login_user(loginModel: LoginModel):
     
    # compare hash of password
@@ -110,7 +110,7 @@ async def login_user(loginModel: LoginModel):
         
         }
 
-@app.post("/user/forgot_password")
+@app.post("/server/user/forgot_password")
 async def forgot_password(forgotModel: ForgotPasswordModel): 
     user_email = forgotModel.email
     reset_code = random.randint(111111, 999999)
@@ -127,7 +127,7 @@ async def forgot_password(forgotModel: ForgotPasswordModel):
     send_email(user.email, "You have requested reset code", f"Your reset code is : {reset_code}")
     return {"message" : "your reset code has been sent"}
 
-@app.get("/user/detail")
+@app.get("/server/user/detail")
 async def get_user_detail(token:str=Header(None)):
     user_id = validate_token_and_get_user(token)    
     if "token" in user_id:
@@ -139,7 +139,7 @@ async def get_user_detail(token:str=Header(None)):
         return HTTPException(status_code=404, detail="user not found")
     return users[0]
 
-@app.post("/user/reset_password")
+@app.post("/server/user/reset_password")
 async def reset_password(resetPassword: ResetPasswordModel):
     # check if the reset code is correct
     user_query = {"email" : resetPassword.email}
@@ -161,7 +161,7 @@ async def reset_password(resetPassword: ResetPasswordModel):
     send_email(user.email, "Your password has been changed", "Your password has been changed, if this is not you then report here.")
     return {"message" : "your password has been changed"}
 
-@app.post("/user/change_password")
+@app.post("/server/user/change_password")
 async def change_password(changePassword: ChangePasswordModel, token: str = Header(None)):
     user_id = validate_token_and_get_user(token)    
     if "token" in user_id:
@@ -185,7 +185,7 @@ async def change_password(changePassword: ChangePasswordModel, token: str = Head
     send_email(user.email, "Your password has been changed", "Your password has been successfully changed")
     return {"message": "password successfully changed"}
     
-@app.put("/user/update_profile")
+@app.put("/server/user/update_profile")
 async def update_profile(updateUser: UpdateUserModel, token: str=Header(None)):
     user_id = validate_token_and_get_user(token)    
     if "token" in user_id:
@@ -196,7 +196,7 @@ async def update_profile(updateUser: UpdateUserModel, token: str=Header(None)):
     return {"message" : "user successfully updated"}
 
 # transaction API's
-@app.post("/transaction/send_money")
+@app.post("/server/transaction/send_money")
 async def send_money(sendMoney: SendMoneyModel, token: str=Header(None)):
     user_id = validate_token_and_get_user(token)    
     if "token" in user_id:
@@ -238,7 +238,7 @@ async def send_money(sendMoney: SendMoneyModel, token: str=Header(None)):
 
     return HTTPException(status_code=400, detail="transfer failed")
    
-@app.get("/transaction/get_all")
+@app.get("/server/transaction/get_all")
 async def get_all_transactions(token: str=Header(None)):
     user_id = validate_token_and_get_user(token)    
     if "token" in user_id:
@@ -250,7 +250,7 @@ async def get_all_transactions(token: str=Header(None)):
     transactions = transaction_model_dal.read(query=transaction_query,limit=24)
     return transactions
 
-@app.post("/transaction/request_money")
+@app.post("/server/transaction/request_money")
 async def request_money(requestMoney: RequestMoneyModel, token: str=Header(None)):
     user_id = validate_token_and_get_user(token)    
     if "token" in user_id:
@@ -295,7 +295,7 @@ async def request_money(requestMoney: RequestMoneyModel, token: str=Header(None)
     
     return {"message" : "request has been sent"}
     
-@app.get("/transaction/fulfil_request")
+@app.get("/server/transaction/fulfil_request")
 async def fulfil_request(transaction_id: str, token: str=Header(None)):
     user_id = validate_token_and_get_user(token)    
     if "token" in user_id:
@@ -336,7 +336,7 @@ async def fulfil_request(transaction_id: str, token: str=Header(None)):
 
     return {"message" : "you have successfully fulfilled transaction request"}
 
-@app.get("/transaction/reject_request")
+@app.get("/server/transaction/reject_request")
 async def reject_request(transaction_id: str, token: str=Header(None)):
     user_id = validate_token_and_get_user(token)    
     if "token" in user_id:
@@ -371,7 +371,7 @@ async def reject_request(transaction_id: str, token: str=Header(None)):
 
     return {"message" : "transaction request has successfully been cancelled or rejected"}
 
-@app.get("/transaction/insight")
+@app.get("/server/transaction/insight")
 async def transaction_insight(days = 7, token: str=Header(None)):
    
     user_id = validate_token_and_get_user(token)    
@@ -404,7 +404,7 @@ async def transaction_insight(days = 7, token: str=Header(None)):
     }
 
 # defining websockets
-@app.websocket("/ws")
+@app.websocket("/server/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await connectionManager.connect(websocket)
     try:
