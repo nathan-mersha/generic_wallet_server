@@ -44,7 +44,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
+@app.get("/server")
 async def read_root():
     message = {
         "userId" : "6bb08f15-c2f6-4ed4-9184-b2bfc5186e83",
